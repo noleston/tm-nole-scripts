@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OZON Nole's ToolKit
 // @namespace    http://tampermonkey.net/
-// @version      1.4
-// @description  A tool for deep data collection from product pages (Desc, Chars, Reviews, Questions) -> Markdown. Optimized for AI.
+// @version      1.9
+// @description  A tool for deep data collection from product pages (Desc, Chars, Reviews, Questions, Stats, Images) -> Markdown. Optimized for AI.
 // @icon         https://st.ozone.ru/assets/favicon.ico
 // @match        https://www.ozon.ru/product/*
 // @grant        GM_setClipboard
@@ -38,6 +38,7 @@
 
         .ozm-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .ozm-row span { font-weight: 500; font-size: 14px; color: var(--textPrimary, #1a1a1a); }
+        .ozm-row-sub { margin-left: 15px; margin-bottom: 8px; margin-top: -6px; opacity: 0.85; }
 
         .ozm-input { background: var(--bgSecondary, #f2f5f9); border: 1px solid var(--lineSeparator, #e2e4e8); color: var(--textPrimary, #1a1a1a); border-radius: 8px; padding: 6px 10px; font-size: 14px; outline: none; transition: border 0.2s; font-family: 'Onest', arial, sans-serif; }
         .ozm-input:focus { border-color: var(--graphicActionPrimary, #005bff); background: var(--bgPrimary, #fff); }
@@ -81,6 +82,18 @@
         #ozm-progress-bar { width: 0%; height: 100%; background-color: var(--bgActionPrimary, #005bff); transition: width 0.3s ease, background-color 0.3s ease; }
         #ozm-progress-text { font-size: 12px; color: var(--textSecondary, #666); margin-top: 6px; text-align: center; font-weight: 500; }
 
+        /* Анимация для бесконечного режима (Лимит 0) */
+        @keyframes ozm-stripes {
+            0% { background-position-x: 1rem; }
+            100% { background-position-x: 0; }
+        }
+        .ozm-progress-indeterminate {
+            background-image: linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 75%, transparent 75%, transparent) !important;
+            background-size: 1rem 1rem !important;
+            animation: ozm-stripes 1s linear infinite !important;
+            transition: background-color 0.3s ease !important;
+        }
+
         @keyframes ozm-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .ozm-spinner { animation: ozm-spin 1s linear infinite; }
     `);
@@ -91,27 +104,21 @@
     container.innerHTML = `
         <div id="ozm-panel">
             <div class="ozm-row"><span>Описание</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-desc"><span class="ozm-slider"></span></label></div>
+            <div class="ozm-row ozm-row-sub"><span>└ Картинки (ссылками)</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-images"><span class="ozm-slider"></span></label></div>
             <div class="ozm-row"><span>Характеристики</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-chars"><span class="ozm-slider"></span></label></div>
+            <div class="ozm-row"><span>Аналитика рейтинга</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-stats"><span class="ozm-slider"></span></label></div>
             <div class="ozm-row"><span>Отзывы</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-reviews"><span class="ozm-slider"></span></label></div>
+            <div class="ozm-row ozm-row-sub"><span>└ Только с текстом</span><label class="ozm-switch"><input type="checkbox" id="ozm-text-only"><span class="ozm-slider"></span></label></div>
             <div class="ozm-row"><span>Вопросы о товаре</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-questions"><span class="ozm-slider"></span></label></div>
 
             <hr style="border: 0; border-top: 1px solid var(--lineSeparator, #e2e4e8); margin: 12px 0;">
 
-            <div class="ozm-row"><span>Лимит (шт.)</span><input type="number" id="ozm-limit" class="ozm-input ozm-input-num" min="1"></div>
-            <div class="ozm-row"><span>Таймаут (мс)</span><input type="number" id="ozm-timeout" class="ozm-input ozm-input-num" min="50" step="50"></div>
-
-            <div class="ozm-hint">
-                ${warningIcon}
-                <span>
-                    <b>300мс</b> для &lt;100 элементов<br>
-                    <b>800мс</b> для 500+ элементов<br><br>
-                    Меньше <b>50мс</b> — вызовет капчу!
-                </span>
-            </div>
+            <div class="ozm-row"><span>Лимит (0 = Все)</span><input type="number" id="ozm-limit" class="ozm-input ozm-input-num" min="0"></div>
+            <div class="ozm-row"><span>Таймаут (мс)</span><input type="number" id="ozm-timeout" class="ozm-input ozm-input-num" min="0" step="50"></div>
 
             <div class="ozm-actions">
-                <button id="ozm-btn-copy" class="ozm-btn ozm-btn-primary"><span>Скопировать в Markdown</span></button>
-                <button id="ozm-btn-download" class="ozm-btn ozm-btn-secondary"><span>Скачать в Markdown</span></button>
+                <button id="ozm-btn-copy" class="ozm-btn ozm-btn-primary"><span>Скопировать Markdown</span></button>
+                <button id="ozm-btn-download" class="ozm-btn ozm-btn-secondary"><span>Скачать Markdown</span></button>
             </div>
 
             <div id="ozm-progress-wrap">
@@ -133,8 +140,11 @@
 
     const els = {
         desc: document.getElementById('ozm-inc-desc'),
+        images: document.getElementById('ozm-inc-images'),
         chars: document.getElementById('ozm-inc-chars'),
+        stats: document.getElementById('ozm-inc-stats'),
         reviews: document.getElementById('ozm-inc-reviews'),
+        textOnly: document.getElementById('ozm-text-only'),
         questions: document.getElementById('ozm-inc-questions'),
         limit: document.getElementById('ozm-limit'),
         timeout: document.getElementById('ozm-timeout')
@@ -144,13 +154,16 @@
     const uiProgBar = document.getElementById('ozm-progress-bar');
     const uiProgText = document.getElementById('ozm-progress-text');
 
-    // Все тумблеры включены по умолчанию (проверяем на !== 'false')
+    // Настройки по умолчанию
     els.desc.checked = localStorage.getItem('ozm_desc') !== 'false';
+    els.images.checked = localStorage.getItem('ozm_images') !== 'false'; // Картинки ВКЛ по умолчанию
     els.chars.checked = localStorage.getItem('ozm_chars') !== 'false';
+    els.stats.checked = localStorage.getItem('ozm_stats') !== 'false';
     els.reviews.checked = localStorage.getItem('ozm_reviews') !== 'false';
+    els.textOnly.checked = localStorage.getItem('ozm_textOnly') !== 'false';
     els.questions.checked = localStorage.getItem('ozm_questions') !== 'false';
     els.limit.value = localStorage.getItem('ozm_limit') || 50;
-    els.timeout.value = localStorage.getItem('ozm_timeout') || 300;
+    els.timeout.value = localStorage.getItem('ozm_timeout') || 100;
 
     Object.keys(els).forEach(key => {
         els[key].addEventListener('change', () => {
@@ -159,20 +172,64 @@
         });
     });
 
+    // 5. Функции прогресса
     function setProgress(current, total, phaseName) {
-        if (total === 0) return;
-        const percent = Math.min(Math.round((current / total) * 100), 100);
         uiProgWrap.classList.add('active');
-        uiProgBar.style.width = `${percent}%`;
-        uiProgText.innerText = `${phaseName}: ${current} / ${total}`;
+
+        if (total === 0) {
+            uiProgBar.classList.add('ozm-progress-indeterminate');
+            uiProgBar.style.width = '100%';
+            uiProgText.innerText = `${phaseName}: выгружено ${current} ...`;
+        } else {
+            uiProgBar.classList.remove('ozm-progress-indeterminate');
+            const percent = Math.min(Math.round((current / total) * 100), 100);
+            uiProgBar.style.width = `${percent}%`;
+            uiProgText.innerText = `${phaseName}: ${current} / ${total}`;
+        }
     }
 
     function hideProgress() {
         uiProgWrap.classList.remove('active');
-        setTimeout(() => { uiProgBar.style.width = '0%'; }, 400);
+        setTimeout(() => {
+            uiProgBar.style.width = '0%';
+            uiProgBar.classList.remove('ozm-progress-indeterminate');
+        }, 400);
     }
 
-    // 5. Умное извлечение текстов из Ozon JSON
+    // 6. Извлечение Статистики
+    function extractRatingStats() {
+        let stats = { score: '', total: 0, stars: {5: 0, 4: 0, 3: 0, 2: 0, 1: 0} };
+        const allDivs = Array.from(document.querySelectorAll('div, span'));
+
+        const scoreEl = allDivs.find(el => el.innerText && el.innerText.match(/^\d[\.,]\d \/ 5$/));
+        if (scoreEl) {
+            stats.score = scoreEl.innerText.trim();
+        }
+
+        const starLabels = [
+            { key: 5, text: '5 звёзд' },
+            { key: 4, text: '4 звезды' },
+            { key: 3, text: '3 звезды' },
+            { key: 2, text: '2 звезды' },
+            { key: 1, text: '1 звезда' }
+        ];
+
+        let foundBreakdown = false;
+        starLabels.forEach(s => {
+            const labelEl = allDivs.find(el => el.innerText === s.text);
+            if (labelEl && labelEl.parentElement) {
+                const countEl = labelEl.parentElement.lastElementChild;
+                if (countEl && /^\d+$/.test(countEl.innerText.replace(/\s/g, ''))) {
+                    stats.stars[s.key] = parseInt(countEl.innerText.replace(/\s/g, ''), 10);
+                    stats.total += stats.stars[s.key];
+                    foundBreakdown = true;
+                }
+            }
+        });
+
+        return foundBreakdown ? stats : null;
+    }
+
     function extractText(obj) {
         if (!obj) return '';
         if (typeof obj === 'string') return obj.trim();
@@ -200,23 +257,27 @@
 
     function extractDate(obj) {
         if (!obj) return '';
-        if (obj.createdAt && typeof obj.createdAt === 'string') return obj.createdAt; // Формат вопросов Ozon
-        if (obj.publishedAt) return new Date(obj.publishedAt * 1000).toLocaleDateString('ru-RU'); // Формат отзывов
+        if (obj.createdAt && typeof obj.createdAt === 'string') return obj.createdAt;
+        if (obj.publishedAt) return new Date(obj.publishedAt * 1000).toLocaleDateString('ru-RU');
         return '';
     }
 
-    // 6. Универсальный парсер API Ozon
+    function reviewHasText(r) {
+        const p = (r.content?.positive || '').trim();
+        const n = (r.content?.negative || '').trim();
+        const c = (r.content?.comment || '').trim();
+        return (p.length > 0 || n.length > 0 || c.length > 0);
+    }
+
+    // 7. Универсальный парсер API Ozon
     async function fetchOzonData(limit, delayMs, dataType, searchKey, progressName) {
         let results = [];
-
-        // Очищаем текущий URL от мусора, если мы уже находимся в отзывах/вопросах
         let baseUrl = window.location.pathname.replace(/\/questions\/?$/, '').replace(/\/reviews\/?$/, '');
         if (!baseUrl.endsWith('/')) baseUrl += '/';
 
         let currentPage = 1;
         let currentUrlParam;
 
-        // Ключевое отличие: Вопросы грузятся с роута /questions/
         if (dataType === 'reviews') {
             currentUrlParam = `${baseUrl}?layout_container=reviewshelfpaginator&page=${currentPage}`;
         } else if (dataType === 'questions') {
@@ -225,7 +286,7 @@
 
         setProgress(0, limit, progressName);
 
-        while (results.length < limit) {
+        while (limit === 0 || results.length < limit) {
             const fullApiUrl = `https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=${encodeURIComponent(currentUrlParam)}`;
 
             try {
@@ -249,7 +310,6 @@
                                 const stateObj = JSON.parse(data.widgetStates[key]);
                                 stateContext = stateObj.state || stateObj;
 
-                                // Логика парсинга Вопросов
                                 if (dataType === 'questions') {
                                     if (stateContext.questionsIds && stateContext.questions) {
                                         stateContext.questionsIds.forEach(qid => {
@@ -268,13 +328,11 @@
                                         });
                                     }
                                 }
-                                // Логика парсинга Отзывов
                                 else if (dataType === 'reviews') {
                                     if (stateObj.reviews && Array.isArray(stateObj.reviews)) pageItems = stateObj.reviews;
                                     else if (stateContext.reviews && Array.isArray(stateContext.reviews)) pageItems = stateContext.reviews;
                                 }
 
-                                // Попытка вытянуть общее кол-во страниц
                                 if (stateContext.paging && stateContext.paging.total) {
                                     totalPages = Math.ceil(stateContext.paging.total / stateContext.paging.perPage);
                                 }
@@ -288,11 +346,10 @@
                 if (pageItems.length === 0) break;
                 results.push(...pageItems);
 
-                setProgress(Math.min(results.length, limit), limit, progressName);
+                setProgress(results.length, limit, progressName);
 
-                if (results.length >= limit) break;
+                if (limit !== 0 && results.length >= limit) break;
 
-                // Пагинация
                 if (data.nextPage) {
                     currentUrlParam = data.nextPage;
                 } else if (currentPage < totalPages) {
@@ -306,22 +363,51 @@
                     break;
                 }
 
-                await new Promise(r => setTimeout(r, delayMs));
+                if (delayMs > 0) {
+                    await new Promise(r => setTimeout(r, delayMs));
+                }
             } catch (err) {
                 console.error(`[Ozon Scraper] Ошибка сбора ${progressName}:`, err);
                 break;
             }
         }
-        return results.slice(0, limit);
+
+        return limit === 0 ? results : results.slice(0, limit);
     }
 
-    // 7. Сборщик Markdown
+    // 8. Сборщик Markdown
     async function generateMarkdown() {
         let md = `# ${document.querySelector('h1')?.innerText.trim() || 'Товар Ozon'}\n\n`;
 
+        // Добавляем главное фото (Обложку)
+        if (els.images.checked) {
+            const mainImg = document.querySelector('meta[property="og:image"]')?.content;
+            if (mainImg) md += `![Обложка товара](${mainImg})\n\n`;
+        }
+
         if (els.desc.checked) {
-            const desc = document.querySelector('[id="section-description"]')?.innerText.replace('Описание\n', '').trim();
-            if (desc) md += `## Описание\n${desc}\n\n`;
+            const descEl = document.querySelector('[id="section-description"]');
+            if (descEl) {
+                const clone = descEl.cloneNode(true);
+
+                // Извлекаем картинки из описания (рекламные баннеры Ozon)
+                if (els.images.checked) {
+                    clone.querySelectorAll('img').forEach(img => {
+                        const src = img.src || img.dataset.src;
+                        if (src && !src.includes('data:image')) {
+                            // Заменяем тег img на текстовый узел Markdown
+                            const mdImg = document.createTextNode(`\n![Иллюстрация описания](${src})\n`);
+                            img.parentNode.replaceChild(mdImg, img);
+                        }
+                    });
+                } else {
+                    // Если галочка снята, просто удаляем картинки, чтобы не мусорить
+                    clone.querySelectorAll('img').forEach(img => img.remove());
+                }
+
+                let descText = clone.innerText.replace(/^Описание\s*/i, '').trim();
+                if (descText) md += `## Описание\n${descText}\n\n`;
+            }
         }
 
         if (els.chars.checked) {
@@ -334,11 +420,35 @@
             md += '\n';
         }
 
-        const limit = parseInt(els.limit.value) || 50;
-        const delayMs = Math.max(parseInt(els.timeout.value) || 300, 50);
+        if (els.stats.checked) {
+            const stats = extractRatingStats();
+            if (stats) {
+                md += `## Аналитика рейтинга\n`;
+                if (stats.score) md += `**Общая оценка:** ${stats.score}\n`;
+                md += `**Всего оценок:** ${stats.total}\n\n`;
+
+                md += `| Оценка | Количество | Процент |\n|---|---|---|\n`;
+                for (let star = 5; star >= 1; star--) {
+                    const count = stats.stars[star];
+                    const pct = stats.total > 0 ? ((count / stats.total) * 100).toFixed(1) : 0;
+                    const starsStr = '⭐'.repeat(star) + '☆'.repeat(5 - star);
+                    md += `| ${starsStr} (${star}) | ${count} | ${pct}% |\n`;
+                }
+                md += `\n`;
+            }
+        }
+
+        let limit = parseInt(els.limit.value, 10);
+        if (isNaN(limit) || limit < 0) limit = 0;
+        const delayMs = Math.max(parseInt(els.timeout.value) || 0, 0);
 
         if (els.reviews.checked) {
-            const reviews = await fetchOzonData(limit, delayMs, 'reviews', 'reviews', 'Сбор отзывов');
+            let reviews = await fetchOzonData(limit, delayMs, 'reviews', 'reviews', 'Сбор отзывов');
+
+            if (els.textOnly.checked) {
+                reviews = reviews.filter(reviewHasText);
+            }
+
             md += `## Отзывы (${reviews.length})\n\n`;
 
             if (reviews.length === 0) {
@@ -353,6 +463,12 @@
                     if (r.content?.positive) textParts.push(`**Достоинства:** ${r.content.positive}`);
                     if (r.content?.negative) textParts.push(`**Недостатки:** ${r.content.negative}`);
                     if (r.content?.comment) textParts.push(`**Комментарий:** ${r.content.comment}`);
+
+                    // Извлекаем фото пользователей из отзывов
+                    if (els.images.checked && r.content?.photos && r.content.photos.length > 0) {
+                        const photosMd = r.content.photos.map(p => `![Фото покупателя](${p.url})`).join(' ');
+                        textParts.push(`**Фотографии:**\n${photosMd}`);
+                    }
 
                     const fullText = textParts.join('\n\n') || 'Нет текста';
                     md += `### ${author} | ${'⭐'.repeat(score)}${'☆'.repeat(5-score)} | ${dateStr}\n${fullText.split('\n').map(l => '> ' + l).join('\n')}\n\n`;
@@ -391,7 +507,7 @@
         return md;
     }
 
-    // 8. Главный обработчик
+    // 9. Главный обработчик
     async function handleAction(btn, actionType) {
         const span = btn.querySelector('span');
         const originalText = span.innerText;
@@ -406,6 +522,9 @@
         try {
             const md = await generateMarkdown();
 
+            uiProgWrap.classList.add('active');
+            uiProgBar.classList.remove('ozm-progress-indeterminate');
+            uiProgBar.style.width = '100%';
             uiProgText.innerText = 'Формирование файла...';
 
             if (actionType === 'copy') {
@@ -425,16 +544,18 @@
             }
 
             btn.innerHTML = `<span>Успешно!</span>`;
-            uiProgBar.style.backgroundColor = '#00b341'; // Зеленый
+            uiProgBar.style.backgroundColor = '#00b341';
             uiProgText.innerText = 'Готово!';
         } catch (e) {
             console.error(e);
             btn.innerHTML = `<span>Ошибка!</span>`;
-            uiProgBar.style.backgroundColor = '#ff3333'; // Красный
+            uiProgWrap.classList.add('active');
+            uiProgBar.classList.remove('ozm-progress-indeterminate');
+            uiProgBar.style.width = '100%';
+            uiProgBar.style.backgroundColor = '#ff3333';
             uiProgText.innerText = 'Произошла ошибка при сборе';
         }
 
-        // Сброс интерфейса
         setTimeout(() => {
             btnCopy.disabled = false;
             btnDownload.disabled = false;
