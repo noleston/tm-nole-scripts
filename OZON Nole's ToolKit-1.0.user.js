@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OZON Nole's ToolKit
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  A tool for deep data collection (Data Mining) from product pages and converting them into pure Markdown format. Optimized for subsequent feeding of data to AI Tools.
+// @version      1.4
+// @description  A tool for deep data collection from product pages (Desc, Chars, Reviews, Questions) -> Markdown. Optimized for AI.
 // @icon         https://st.ozone.ru/assets/favicon.ico
 // @match        https://www.ozon.ru/product/*
 // @grant        GM_setClipboard
@@ -33,7 +33,7 @@
         #ozm-trigger-btn:hover::after { opacity: 0.08; }
         #ozm-trigger-btn svg { position: relative; z-index: 2; }
 
-        #ozm-panel { position: absolute; bottom: calc(100% + 15px); right: 0; width: 300px; background-color: var(--bgPrimary, #ffffff); border: 1px solid var(--lineSeparator, #e2e4e8); padding: 20px; border-radius: 16px; color: var(--textPrimary, #1a1a1a); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15); opacity: 0; transform: translateY(10px); visibility: hidden; transition: all 0.2s ease-out; }
+        #ozm-panel { position: absolute; bottom: calc(100% + 15px); right: 0; width: 310px; background-color: var(--bgPrimary, #ffffff); border: 1px solid var(--lineSeparator, #e2e4e8); padding: 20px; border-radius: 16px; color: var(--textPrimary, #1a1a1a); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15); opacity: 0; transform: translateY(10px); visibility: hidden; transition: all 0.2s ease-out; }
         #ozm-panel.visible { opacity: 1; transform: translateY(0); visibility: visible; }
 
         .ozm-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -54,18 +54,32 @@
         input:checked + .ozm-slider { background-color: var(--bgActionPrimary, #005bff); }
         input:checked + .ozm-slider:before { transform: translateX(16px); }
 
-        /* Блок кнопок */
         .ozm-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
         .ozm-btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px; border: none; border-radius: 12px; cursor: pointer; font-weight: 600; font-size: 15px; transition: filter 0.2s, background 0.2s; font-family: 'Onest', arial, sans-serif; }
         .ozm-btn:disabled { opacity: 0.7; cursor: not-allowed; }
 
-        /* Главная кнопка (Копировать) */
         .ozm-btn-primary { background: var(--bgActionPrimary, #005bff); color: var(--textPrimaryInverse, #fff); }
         .ozm-btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-
-        /* Второстепенная кнопка (Скачать) */
         .ozm-btn-secondary { background: var(--bgSecondary, #f2f5f9); color: var(--textPrimary, #1a1a1a); border: 1px solid var(--lineSeparator, #e2e4e8); }
         .ozm-btn-secondary:hover:not(:disabled) { background: var(--lineSeparator, #e2e4e8); }
+
+        /* Идеально плавная CSS Grid анимация для прогресс-бара */
+        #ozm-progress-wrap {
+            display: grid;
+            grid-template-rows: 0fr;
+            opacity: 0;
+            transition: grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
+            margin-top: 0;
+        }
+        #ozm-progress-wrap.active {
+            grid-template-rows: 1fr;
+            opacity: 1;
+            margin-top: 12px;
+        }
+        #ozm-progress-inner { overflow: hidden; padding-top: 2px; }
+        #ozm-progress-bg { width: 100%; height: 6px; background-color: var(--lineSeparator, #e2e4e8); border-radius: 3px; overflow: hidden; }
+        #ozm-progress-bar { width: 0%; height: 100%; background-color: var(--bgActionPrimary, #005bff); transition: width 0.3s ease, background-color 0.3s ease; }
+        #ozm-progress-text { font-size: 12px; color: var(--textSecondary, #666); margin-top: 6px; text-align: center; font-weight: 500; }
 
         @keyframes ozm-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .ozm-spinner { animation: ozm-spin 1s linear infinite; }
@@ -79,24 +93,32 @@
             <div class="ozm-row"><span>Описание</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-desc"><span class="ozm-slider"></span></label></div>
             <div class="ozm-row"><span>Характеристики</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-chars"><span class="ozm-slider"></span></label></div>
             <div class="ozm-row"><span>Отзывы</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-reviews"><span class="ozm-slider"></span></label></div>
+            <div class="ozm-row"><span>Вопросы о товаре</span><label class="ozm-switch"><input type="checkbox" id="ozm-inc-questions"><span class="ozm-slider"></span></label></div>
 
             <hr style="border: 0; border-top: 1px solid var(--lineSeparator, #e2e4e8); margin: 12px 0;">
 
-            <div class="ozm-row"><span>Лимит отзывов</span><input type="number" id="ozm-limit" class="ozm-input ozm-input-num" min="1"></div>
+            <div class="ozm-row"><span>Лимит (шт.)</span><input type="number" id="ozm-limit" class="ozm-input ozm-input-num" min="1"></div>
             <div class="ozm-row"><span>Таймаут (мс)</span><input type="number" id="ozm-timeout" class="ozm-input ozm-input-num" min="50" step="50"></div>
 
             <div class="ozm-hint">
                 ${warningIcon}
                 <span>
-                    <b>300мс</b> для 50-100 отзывов<br>
-                    <b>800мс</b> для 500+<br><br>
-                    Значения ниже <b>50мс</b> могут вызвать капчу!
+                    <b>300мс</b> для &lt;100 элементов<br>
+                    <b>800мс</b> для 500+ элементов<br><br>
+                    Меньше <b>50мс</b> — вызовет капчу!
                 </span>
             </div>
 
             <div class="ozm-actions">
                 <button id="ozm-btn-copy" class="ozm-btn ozm-btn-primary"><span>Скопировать в Markdown</span></button>
                 <button id="ozm-btn-download" class="ozm-btn ozm-btn-secondary"><span>Скачать в Markdown</span></button>
+            </div>
+
+            <div id="ozm-progress-wrap">
+                <div id="ozm-progress-inner">
+                    <div id="ozm-progress-bg"><div id="ozm-progress-bar"></div></div>
+                    <div id="ozm-progress-text">Подготовка...</div>
+                </div>
             </div>
         </div>
         <button id="ozm-trigger-btn" aria-label="Скачать в Markdown" title="Экспорт данных товара">${triggerIcon}</button>
@@ -105,10 +127,7 @@
 
     // 4. Логика UI
     const panel = document.getElementById('ozm-panel');
-
-    // ВАЖНО: Останавливаем клики внутри всего контейнера, чтобы панель не закрывалась при нажатии кнопок
     container.addEventListener('click', (e) => e.stopPropagation());
-
     document.getElementById('ozm-trigger-btn').onclick = () => panel.classList.toggle('visible');
     document.onclick = () => panel.classList.remove('visible');
 
@@ -116,13 +135,20 @@
         desc: document.getElementById('ozm-inc-desc'),
         chars: document.getElementById('ozm-inc-chars'),
         reviews: document.getElementById('ozm-inc-reviews'),
+        questions: document.getElementById('ozm-inc-questions'),
         limit: document.getElementById('ozm-limit'),
         timeout: document.getElementById('ozm-timeout')
     };
 
+    const uiProgWrap = document.getElementById('ozm-progress-wrap');
+    const uiProgBar = document.getElementById('ozm-progress-bar');
+    const uiProgText = document.getElementById('ozm-progress-text');
+
+    // Все тумблеры включены по умолчанию (проверяем на !== 'false')
     els.desc.checked = localStorage.getItem('ozm_desc') !== 'false';
     els.chars.checked = localStorage.getItem('ozm_chars') !== 'false';
     els.reviews.checked = localStorage.getItem('ozm_reviews') !== 'false';
+    els.questions.checked = localStorage.getItem('ozm_questions') !== 'false';
     els.limit.value = localStorage.getItem('ozm_limit') || 50;
     els.timeout.value = localStorage.getItem('ozm_timeout') || 300;
 
@@ -133,13 +159,71 @@
         });
     });
 
-    // 5. Парсер данных
-    async function fetchReviews(limit, delayMs) {
+    function setProgress(current, total, phaseName) {
+        if (total === 0) return;
+        const percent = Math.min(Math.round((current / total) * 100), 100);
+        uiProgWrap.classList.add('active');
+        uiProgBar.style.width = `${percent}%`;
+        uiProgText.innerText = `${phaseName}: ${current} / ${total}`;
+    }
+
+    function hideProgress() {
+        uiProgWrap.classList.remove('active');
+        setTimeout(() => { uiProgBar.style.width = '0%'; }, 400);
+    }
+
+    // 5. Умное извлечение текстов из Ozon JSON
+    function extractText(obj) {
+        if (!obj) return '';
+        if (typeof obj === 'string') return obj.trim();
+        if (obj.content) {
+            if (typeof obj.content === 'string') return obj.content.trim();
+            if (obj.content.text) return obj.content.text.trim();
+        }
+        if (obj.text) return obj.text.trim();
+        if (obj.value) return obj.value.trim();
+        return '';
+    }
+
+    function extractAuthor(obj) {
+        if (!obj) return 'Пользователь';
+        if (typeof obj === 'string') return obj;
+        if (obj.name) return obj.name;
+        if (obj.firstName) return obj.firstName;
+        if (obj.authorName) return obj.authorName;
+        if (obj.author) {
+            if (obj.author.name) return obj.author.name;
+            if (obj.author.firstName) return obj.author.firstName;
+        }
+        return 'Пользователь';
+    }
+
+    function extractDate(obj) {
+        if (!obj) return '';
+        if (obj.createdAt && typeof obj.createdAt === 'string') return obj.createdAt; // Формат вопросов Ozon
+        if (obj.publishedAt) return new Date(obj.publishedAt * 1000).toLocaleDateString('ru-RU'); // Формат отзывов
+        return '';
+    }
+
+    // 6. Универсальный парсер API Ozon
+    async function fetchOzonData(limit, delayMs, dataType, searchKey, progressName) {
         let results = [];
-        let baseUrl = window.location.pathname;
+
+        // Очищаем текущий URL от мусора, если мы уже находимся в отзывах/вопросах
+        let baseUrl = window.location.pathname.replace(/\/questions\/?$/, '').replace(/\/reviews\/?$/, '');
         if (!baseUrl.endsWith('/')) baseUrl += '/';
 
-        let currentUrlParam = `${baseUrl}?layout_container=reviewshelfpaginator&page=1`;
+        let currentPage = 1;
+        let currentUrlParam;
+
+        // Ключевое отличие: Вопросы грузятся с роута /questions/
+        if (dataType === 'reviews') {
+            currentUrlParam = `${baseUrl}?layout_container=reviewshelfpaginator&page=${currentPage}`;
+        } else if (dataType === 'questions') {
+            currentUrlParam = `${baseUrl}questions/?page=${currentPage}`;
+        }
+
+        setProgress(0, limit, progressName);
 
         while (results.length < limit) {
             const fullApiUrl = `https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2?url=${encodeURIComponent(currentUrlParam)}`;
@@ -154,39 +238,84 @@
 
                 if (!response.ok) break;
                 const data = await response.json();
-                let pageReviews = [];
+                let pageItems = [];
+                let totalPages = 1;
+                let stateContext = null;
 
                 if (data.widgetStates) {
                     for (const key in data.widgetStates) {
-                        if (key.includes('webListReviews') || key.includes('reviews')) {
+                        if (key.toLowerCase().includes(searchKey)) {
                             try {
                                 const stateObj = JSON.parse(data.widgetStates[key]);
-                                if (stateObj.reviews && Array.isArray(stateObj.reviews)) {
-                                    pageReviews = stateObj.reviews;
-                                    break;
+                                stateContext = stateObj.state || stateObj;
+
+                                // Логика парсинга Вопросов
+                                if (dataType === 'questions') {
+                                    if (stateContext.questionsIds && stateContext.questions) {
+                                        stateContext.questionsIds.forEach(qid => {
+                                            let q = stateContext.questions[qid];
+                                            if (q) {
+                                                q.parsedAnswers = [];
+                                                if (stateContext.questionAnswers && stateContext.questionAnswers[qid]) {
+                                                    stateContext.questionAnswers[qid].forEach(aid => {
+                                                        if (stateContext.answers && stateContext.answers[aid]) {
+                                                            q.parsedAnswers.push(stateContext.answers[aid]);
+                                                        }
+                                                    });
+                                                }
+                                                pageItems.push(q);
+                                            }
+                                        });
+                                    }
                                 }
+                                // Логика парсинга Отзывов
+                                else if (dataType === 'reviews') {
+                                    if (stateObj.reviews && Array.isArray(stateObj.reviews)) pageItems = stateObj.reviews;
+                                    else if (stateContext.reviews && Array.isArray(stateContext.reviews)) pageItems = stateContext.reviews;
+                                }
+
+                                // Попытка вытянуть общее кол-во страниц
+                                if (stateContext.paging && stateContext.paging.total) {
+                                    totalPages = Math.ceil(stateContext.paging.total / stateContext.paging.perPage);
+                                }
+
+                                if (pageItems.length > 0) break;
                             } catch (e) {}
                         }
                     }
                 }
 
-                if (pageReviews.length === 0) break;
-                results.push(...pageReviews);
+                if (pageItems.length === 0) break;
+                results.push(...pageItems);
 
-                if (data.nextPage && results.length < limit) {
+                setProgress(Math.min(results.length, limit), limit, progressName);
+
+                if (results.length >= limit) break;
+
+                // Пагинация
+                if (data.nextPage) {
                     currentUrlParam = data.nextPage;
-                    await new Promise(r => setTimeout(r, delayMs));
+                } else if (currentPage < totalPages) {
+                    currentPage++;
+                    if (dataType === 'reviews') {
+                        currentUrlParam = `${baseUrl}?layout_container=reviewshelfpaginator&page=${currentPage}`;
+                    } else {
+                        currentUrlParam = `${baseUrl}questions/?page=${currentPage}`;
+                    }
                 } else {
                     break;
                 }
+
+                await new Promise(r => setTimeout(r, delayMs));
             } catch (err) {
-                console.error("[Ozon Scraper] Fetch error:", err);
+                console.error(`[Ozon Scraper] Ошибка сбора ${progressName}:`, err);
                 break;
             }
         }
         return results.slice(0, limit);
     }
 
+    // 7. Сборщик Markdown
     async function generateMarkdown() {
         let md = `# ${document.querySelector('h1')?.innerText.trim() || 'Товар Ozon'}\n\n`;
 
@@ -205,24 +334,20 @@
             md += '\n';
         }
 
-        if (els.reviews.checked) {
-            const limit = parseInt(els.limit.value) || 50;
-            const delayMs = Math.max(parseInt(els.timeout.value) || 300, 50);
+        const limit = parseInt(els.limit.value) || 50;
+        const delayMs = Math.max(parseInt(els.timeout.value) || 300, 50);
 
-            const reviews = await fetchReviews(limit, delayMs);
+        if (els.reviews.checked) {
+            const reviews = await fetchOzonData(limit, delayMs, 'reviews', 'reviews', 'Сбор отзывов');
             md += `## Отзывы (${reviews.length})\n\n`;
 
             if (reviews.length === 0) {
-                md += `*Не удалось загрузить отзывы.*\n\n`;
+                md += `*Отзывов не найдено.*\n\n`;
             } else {
                 reviews.forEach(r => {
-                    const author = r.author?.firstName || 'Аноним';
+                    const author = extractAuthor(r.author);
                     const score = r.content?.score || 0;
-
-                    let dateStr = '';
-                    if (r.publishedAt) {
-                        dateStr = new Date(r.publishedAt * 1000).toLocaleDateString('ru-RU');
-                    }
+                    const dateStr = extractDate(r);
 
                     let textParts = [];
                     if (r.content?.positive) textParts.push(`**Достоинства:** ${r.content.positive}`);
@@ -230,29 +355,58 @@
                     if (r.content?.comment) textParts.push(`**Комментарий:** ${r.content.comment}`);
 
                     const fullText = textParts.join('\n\n') || 'Нет текста';
-
                     md += `### ${author} | ${'⭐'.repeat(score)}${'☆'.repeat(5-score)} | ${dateStr}\n${fullText.split('\n').map(l => '> ' + l).join('\n')}\n\n`;
                 });
             }
         }
+
+        if (els.questions.checked) {
+            const questions = await fetchOzonData(limit, delayMs, 'questions', 'weblistquestions', 'Сбор вопросов');
+            md += `## Вопросы о товаре (${questions.length})\n\n`;
+
+            if (questions.length === 0) {
+                md += `*Вопросов не найдено.*\n\n`;
+            } else {
+                questions.forEach(q => {
+                    const qAuthor = extractAuthor(q);
+                    const qText = extractText(q) || 'Без текста вопроса';
+                    const qDate = extractDate(q);
+
+                    md += `**Вопрос:** ${qText}\n*— ${qAuthor}* ${qDate ? `(${qDate})` : ''}\n\n`;
+
+                    if (q.parsedAnswers && q.parsedAnswers.length > 0) {
+                        q.parsedAnswers.forEach(ans => {
+                            const ansAuthor = extractAuthor(ans);
+                            const ansText = extractText(ans) || 'Без текста ответа';
+                            md += `> **Ответ:** ${ansText}\n> *— ${ansAuthor}*\n\n`;
+                        });
+                    } else {
+                         md += `> *На этот вопрос пока нет ответов.*\n\n`;
+                    }
+                    md += `---\n\n`;
+                });
+            }
+        }
+
         return md;
     }
 
-    // 6. Единый обработчик действий (Копировать / Скачать)
+    // 8. Главный обработчик
     async function handleAction(btn, actionType) {
         const span = btn.querySelector('span');
         const originalText = span.innerText;
 
-        // Блокируем обе кнопки на время работы
         const btnCopy = document.getElementById('ozm-btn-copy');
         const btnDownload = document.getElementById('ozm-btn-download');
         btnCopy.disabled = true;
         btnDownload.disabled = true;
 
-        btn.innerHTML = loadingSpinner + `<span>Собираю...</span>`;
+        btn.innerHTML = loadingSpinner + `<span>В процессе...</span>`;
 
         try {
             const md = await generateMarkdown();
+
+            uiProgText.innerText = 'Формирование файла...';
 
             if (actionType === 'copy') {
                 GM_setClipboard(md);
@@ -261,7 +415,6 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                // Пытаемся вытащить ID товара из ссылки, чтобы файл имел уникальное имя
                 const skuMatch = window.location.pathname.match(/-(\d+)\/?$/);
                 const sku = skuMatch ? skuMatch[1] : 'export';
                 a.download = `Ozon_${sku}.md`;
@@ -272,20 +425,25 @@
             }
 
             btn.innerHTML = `<span>Успешно!</span>`;
+            uiProgBar.style.backgroundColor = '#00b341'; // Зеленый
+            uiProgText.innerText = 'Готово!';
         } catch (e) {
             console.error(e);
             btn.innerHTML = `<span>Ошибка!</span>`;
+            uiProgBar.style.backgroundColor = '#ff3333'; // Красный
+            uiProgText.innerText = 'Произошла ошибка при сборе';
         }
 
-        // Возвращаем исходный вид через 2 секунды
+        // Сброс интерфейса
         setTimeout(() => {
             btnCopy.disabled = false;
             btnDownload.disabled = false;
             btn.innerHTML = `<span>${originalText}</span>`;
-        }, 2000);
+            hideProgress();
+            setTimeout(() => { uiProgBar.style.backgroundColor = 'var(--bgActionPrimary, #005bff)'; }, 400);
+        }, 2500);
     }
 
-    // Привязываем события
     document.getElementById('ozm-btn-copy').onclick = function() { handleAction(this, 'copy'); };
     document.getElementById('ozm-btn-download').onclick = function() { handleAction(this, 'download'); };
 
